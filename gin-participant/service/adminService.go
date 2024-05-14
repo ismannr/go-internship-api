@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"gin-crud/initializers"
 	model "gin-crud/models"
@@ -8,11 +9,11 @@ import (
 	"gin-crud/response"
 	"gin-crud/utils"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"net/http"
 	"net/mail"
 	"regexp"
-	"strconv"
 	"strings"
 )
 
@@ -86,14 +87,17 @@ func CreateParticipant(c *gin.Context) {
 		response.GlobalResponse(c, message, http.StatusBadRequest, nil)
 		return
 	}
-
+	userId := uuid.New()
 	systemUser := model.SystemData{
+		ID:       uuid.New(),
+		UserID:   userId,
 		Email:    req.Email,
 		Password: password,
 		Role:     model.RoleParticipant,
 		Level:    model.LevelUser,
 	}
 	user := model.ParticipantData{
+		ID:           userId,
 		Name:         req.Name,
 		MentorId:     strings.ToUpper(req.MentorId),
 		Gender:       strings.ToUpper(req.Gender),
@@ -103,8 +107,8 @@ func CreateParticipant(c *gin.Context) {
 		Province:     req.Province,
 		City:         req.City,
 		PhoneNumber:  req.PhoneNumber,
-		SystemDataID: systemUser.ID,
-		SystemData:   systemUser,
+		SystemDataID: &systemUser.ID,
+		SystemData:   &systemUser,
 	}
 
 	result := initializers.DB.Create(&user)
@@ -131,25 +135,28 @@ func GetParticipantList(c *gin.Context) {
 	response.GlobalResponse(c, "Successfully retrieving users", http.StatusOK, users)
 }
 
-func getParticipantByIdentifier(c *gin.Context, identifier string) (*model.ParticipantData, error) {
+func getParticipantByIdentifier(identifier string) (*model.ParticipantData, error) {
 	var user model.ParticipantData
 
-	id, err := strconv.ParseUint(identifier, 10, 64)
-	if err == nil && id > 0 {
-		if result := initializers.DB.Preload("SystemData").First(&user, id); result.Error != nil {
-			return nil, result.Error
+	if identifier != "" {
+		if _, err := uuid.Parse(identifier); err == nil {
+			if result := initializers.DB.Preload("SystemData").Preload("SystemData.RecoveryToken").Where("id = ?", identifier).First(&user); result.Error != nil {
+				return nil, result.Error
+			}
+		} else {
+			if result := initializers.DB.Where("email = ?", identifier).Preload("SystemData").First(&user); result.Error != nil {
+				return nil, result.Error
+			}
 		}
 	} else {
-		if result := initializers.DB.Where("email = ?", identifier).Preload("SystemData").First(&user); result.Error != nil {
-			return nil, result.Error
-		}
+		return nil, errors.New("identifier is empty")
 	}
 	return &user, nil
 }
 
 func GetParticipantById(c *gin.Context) {
 	id := c.Param("id")
-	user, err := getParticipantByIdentifier(c, id)
+	user, err := getParticipantByIdentifier(id)
 	if err != nil {
 		response.GlobalResponse(c, fmt.Sprintf("Participant_data with ID: %s not found", id), http.StatusBadRequest, err)
 		return
@@ -159,44 +166,36 @@ func GetParticipantById(c *gin.Context) {
 }
 
 func GetParticipantByEmail(c *gin.Context) {
-	var req request.ParticipantRequest
+	email := c.Param("email")
 
-	if err := c.Bind(&req); err != nil {
-		response.GlobalResponse(c, "Error binding the requested data", http.StatusBadRequest, err)
-		return
-	}
-
-	user, err := getParticipantByIdentifier(c, req.Email)
+	user, err := getParticipantByIdentifier(email)
 	if err != nil {
-		response.GlobalResponse(c, fmt.Sprintf("Participant_data with email %s not found", req.Email), http.StatusBadRequest, err)
+		response.GlobalResponse(c, fmt.Sprintf("Participant_data with email %s not found", email), http.StatusBadRequest, err)
 		return
 	}
 
-	response.GlobalResponse(c, fmt.Sprintf("Successfully retrieving user with email %s", req.Email), http.StatusOK, user)
+	response.GlobalResponse(c, fmt.Sprintf("Successfully retrieving user with email %s", email), http.StatusOK, user)
 }
 
 func DeleteUserById(c *gin.Context) {
 	id := c.Param("id")
-	var user model.ParticipantData
-	if err := initializers.DB.Preload("SystemData").First(&user, id).Error; err != nil {
-		response.GlobalResponse(c, fmt.Sprintf("Error retrieving user with ID %s", id), http.StatusInternalServerError, err)
+	user, err := getParticipantByIdentifier(id)
+	if err != nil {
+		response.GlobalResponse(c, fmt.Sprintf("Participant_data with email %s not found", id), http.StatusBadRequest, err)
 		return
 	}
-
-	if err := initializers.DB.Unscoped().Delete(&user.SystemData).Error; err != nil {
-		response.GlobalResponse(c, fmt.Sprintf("Error deleting participant system data with user ID %s", id), http.StatusInternalServerError, err)
-		return
-	}
-	if err := initializers.DB.Unscoped().Delete(&user).Error; err != nil {
+	fmt.Println(user)
+	if err := initializers.DB.Preload("RecoveryToken").Unscoped().Delete(&user.SystemData).Error; err != nil {
 		response.GlobalResponse(c, fmt.Sprintf("Error deleting participant with ID %s", id), http.StatusInternalServerError, err)
 		return
 	}
+
 	response.GlobalResponse(c, fmt.Sprintf("Successfully deleted user with ID %s", id), http.StatusOK, nil)
 }
 
 func UpdateParticipantById(c *gin.Context) {
 	id := c.Param("id")
-	participant, err := getParticipantByIdentifier(c, id)
+	participant, err := getParticipantByIdentifier(id)
 	if err != nil {
 		response.GlobalResponse(c, err.Error(), http.StatusUnauthorized, nil)
 		return
@@ -226,4 +225,90 @@ func UpdateParticipantById(c *gin.Context) {
 	}
 	response.GlobalResponse(c, message, http.StatusOK, participant)
 
+}
+
+func UploadCvById(c *gin.Context) {
+	id := c.Param("id")
+	participant, err := getParticipantByIdentifier(id)
+	if err != nil {
+		response.GlobalResponse(c, fmt.Sprintf("Participant_data with ID: %s not found", id), http.StatusBadRequest, err)
+		return
+	}
+	CvUploader(c, participant)
+}
+
+func UploadProfilePictureById(c *gin.Context) {
+	id := c.Param("id")
+	participant, err := getParticipantByIdentifier(id)
+	if err != nil {
+		response.GlobalResponse(c, fmt.Sprintf("Participant_data with ID: %s not found", id), http.StatusBadRequest, err)
+		return
+	}
+	ProfilePictureUploader(c, participant)
+}
+
+func DeleteProfilePictureById(c *gin.Context) {
+	id := c.Param("id")
+	participant, err := getParticipantByIdentifier(id)
+	if err != nil {
+		response.GlobalResponse(c, "Failed to retrieve user request", http.StatusBadRequest, nil)
+		return
+	}
+	DeleteProfilePicture(c, participant)
+}
+
+func DeleteCvById(c *gin.Context) {
+	id := c.Param("id")
+	participant, err := getParticipantByIdentifier(id)
+	if err != nil {
+		response.GlobalResponse(c, "Failed to retrieve user request", http.StatusBadRequest, nil)
+		return
+	}
+	DeleteCv(c, participant)
+}
+
+func GetProfilePictureById(c *gin.Context) {
+	id := c.Param("id")
+	participant, err := getParticipantByIdentifier(id)
+	if err != nil {
+		response.GlobalResponse(c, "Failed to retrieve user request", http.StatusBadRequest, nil)
+		return
+	}
+	GetProfilePictureURL(c, participant)
+}
+
+func GetCvById(c *gin.Context) {
+	id := c.Param("id")
+	participant, err := getParticipantByIdentifier(id)
+	if err != nil {
+		response.GlobalResponse(c, "Failed to retrieve user request", http.StatusBadRequest, nil)
+		return
+	}
+	GetCvURL(c, participant)
+}
+
+func IsActivated(c *gin.Context) {
+	id := c.Param("id")
+
+	user, err := getParticipantByIdentifier(id)
+	if err != nil {
+		response.GlobalResponse(c, "Failed to retrieve user request", http.StatusBadRequest, nil)
+		return
+	}
+
+	user.SystemData.IsActivated = !user.SystemData.IsActivated
+
+	if err := initializers.DB.Save(&user.SystemData).Error; err != nil {
+		response.GlobalResponse(c, fmt.Sprintf("Error updating activation status for user with ID %s", id), http.StatusInternalServerError, err)
+		return
+	}
+
+	var message string
+	if user.SystemData.IsActivated {
+		message = fmt.Sprintf("User with ID %s has been activated", id)
+	} else {
+		message = fmt.Sprintf("User with ID %s has been deactivated", id)
+	}
+
+	response.GlobalResponse(c, message, http.StatusOK, nil)
 }

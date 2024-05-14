@@ -22,3 +22,9 @@ func IsAdult(dob string) bool {
 	minimumAdultAge := 17
 	return time.Now().Sub(strDob) >= time.Duration(minimumAdultAge)*365*24*time.Hour
 }
+
+func CurrentTimeWIB() time.Time {
+	location := time.FixedZone("GMT+7", 7*60*60) // 7 hours ahead of UTC
+	currentTime := time.Now().In(location)
+	return currentTime
+}

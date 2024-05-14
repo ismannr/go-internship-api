@@ -126,7 +126,7 @@ func validateParticipantRequest(req request.ParticipantRequest, participant *mod
 		}
 	}
 
-	if len(req.Gender) != 0 && req.Gender != participant.Gender {
+	if len(req.Gender) != 0 && strings.ToLower(req.Gender) != strings.ToLower(participant.Gender) {
 		if strings.ToLower(req.Gender) != "male" && strings.ToLower(req.Gender) != "female" {
 			invalid = append(invalid, "Gender(must be 'male' or 'female')")
 			isSatisfied = false
@@ -165,6 +165,15 @@ func validateParticipantRequest(req request.ParticipantRequest, participant *mod
 			participant.Address = req.Address
 		}
 	}
+	if len(req.Province) != 0 && req.Province != participant.Province {
+		valid = append(valid, "Address")
+		participant.Address = req.Address
+
+	}
+	if len(req.City) != 0 && req.City != participant.City {
+		valid = append(valid, "Address")
+		participant.Address = req.Address
+	}
 
 	if req.Gpa != 0 && req.Gpa != participant.Gpa {
 		if req.Gpa < 0.01 || req.Gpa > 4.00 {
@@ -180,4 +189,58 @@ func validateParticipantRequest(req request.ParticipantRequest, participant *mod
 		return "Invalid fields: " + strings.Join(invalid, ", "), nil, 400, nil
 	}
 	return "Updated fields: " + strings.Join(valid, ", "), nil, 200, participant
+}
+
+func UploadProfilePictureByAuth(c *gin.Context) {
+	participant, err := getParticipantByAuth(c)
+	if err != nil {
+		response.GlobalResponse(c, "Failed to retrieve user request", http.StatusBadRequest, err.Error())
+		return
+	}
+	ProfilePictureUploader(c, participant)
+}
+
+func UploadCvByAuth(c *gin.Context) {
+	participant, err := getParticipantByAuth(c)
+	if err != nil {
+		response.GlobalResponse(c, "Failed to retrieve user request", http.StatusBadRequest, nil)
+		return
+	}
+	CvUploader(c, participant)
+}
+
+func DeleteProfilePictureByAuth(c *gin.Context) {
+	participant, err := getParticipantByAuth(c)
+	if err != nil {
+		response.GlobalResponse(c, "Failed to retrieve user request", http.StatusBadRequest, nil)
+		return
+	}
+	DeleteProfilePicture(c, participant)
+}
+
+func DeleteCvByAuth(c *gin.Context) {
+	participant, err := getParticipantByAuth(c)
+	if err != nil {
+		response.GlobalResponse(c, "Failed to retrieve user request", http.StatusBadRequest, nil)
+		return
+	}
+	DeleteCv(c, participant)
+}
+
+func GetProfilePictureByAuth(c *gin.Context) {
+	participant, err := getParticipantByAuth(c)
+	if err != nil {
+		response.GlobalResponse(c, "Failed to retrieve user request", http.StatusBadRequest, nil)
+		return
+	}
+	GetProfilePictureURL(c, participant)
+}
+
+func GetCvByAuth(c *gin.Context) {
+	participant, err := getParticipantByAuth(c)
+	if err != nil {
+		response.GlobalResponse(c, "Failed to retrieve user request", http.StatusBadRequest, nil)
+		return
+	}
+	GetCvURL(c, participant)
 }

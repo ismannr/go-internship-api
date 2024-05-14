@@ -3,6 +3,7 @@ package main
 import (
 	"gin-crud/controller"
 	"gin-crud/initializers"
+	"gin-crud/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -16,5 +17,6 @@ func main() {
 	controller.UserController(r)
 	controller.GuestController(r)
 	controller.AdminController(r)
-	r.Run() // listen and serve on default 0.0.0.0:8080
+	go service.TokenExpirationCheckAndUpdateScheduler()
+	r.Run()
 }
